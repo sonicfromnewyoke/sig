@@ -6,6 +6,7 @@ const network = @import("zig-network");
 const helpers = @import("helpers.zig");
 const sig = @import("../sig.zig");
 const config = @import("config.zig");
+const ConfigFile = @import("config_file.zig");
 const zstd = @import("zstd");
 
 const Allocator = std.mem.Allocator;
@@ -66,7 +67,7 @@ pub fn run() !void {
     var gossip_host_option = cli.Option{
         .long_name = "gossip-host",
         .help = "IPv4 address for the validator to advertise in gossip - default: get from --entrypoint, fallback to 127.0.0.1",
-        .value_ref = cli.mkRef(&config.current.gossip.host),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.host),
         .required = false,
         .value_name = "Gossip Host",
     };
@@ -75,7 +76,7 @@ pub fn run() !void {
         .long_name = "gossip-port",
         .help = "The port to run gossip listener - default: 8001",
         .short_alias = 'p',
-        .value_ref = cli.mkRef(&config.current.gossip.port),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.port),
         .required = false,
         .value_name = "Gossip Port",
     };
@@ -124,7 +125,7 @@ pub fn run() !void {
         .long_name = "entrypoint",
         .help = "gossip address of the entrypoint validators",
         .short_alias = 'e',
-        .value_ref = cli.mkRef(&config.current.gossip.entrypoints),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.entrypoints),
         .required = false,
         .value_name = "Entrypoints",
     };
@@ -133,7 +134,7 @@ pub fn run() !void {
         .long_name = "network",
         .help = "cluster to connect to - adds gossip entrypoints, sets default genesis file path",
         .short_alias = 'n',
-        .value_ref = cli.mkRef(&config.current.gossip.network),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.network),
         .required = false,
         .value_name = "Network for Entrypoints",
     };
@@ -142,7 +143,7 @@ pub fn run() !void {
         .long_name = "trusted_validator",
         .help = "public key of a validator whose snapshot hash is trusted to be downloaded",
         .short_alias = 't',
-        .value_ref = cli.mkRef(&config.current.gossip.trusted_validators),
+        .value_ref = cli.mkRef(&ConfigFile.consensus.trusted_validators),
         .required = false,
         .value_name = "Trusted Validator",
     };
@@ -150,7 +151,7 @@ pub fn run() !void {
     var gossip_spy_node_option = cli.Option{
         .long_name = "spy-node",
         .help = "run as a gossip spy node (minimize outgoing packets)",
-        .value_ref = cli.mkRef(&config.current.gossip.spy_node),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.spy_node),
         .required = false,
         .value_name = "Spy Node",
     };
@@ -158,7 +159,7 @@ pub fn run() !void {
     var gossip_dump_option = cli.Option{
         .long_name = "dump-gossip",
         .help = "periodically dump gossip table to csv files and logs",
-        .value_ref = cli.mkRef(&config.current.gossip.dump),
+        .value_ref = cli.mkRef(&ConfigFile.gossip.dump),
         .required = false,
         .value_name = "Gossip Table Dump",
     };
@@ -755,8 +756,8 @@ fn shredCollector() !void {
     var app_base = try AppBase.init(allocator);
     defer app_base.deinit();
 
-    const repair_port: u16 = config.current.shred_collector.repair_port;
-    const turbine_recv_port: u16 = config.current.shred_collector.turbine_recv_port;
+    const repair_port: u16 = ConfigFile.gossip.repair_port;
+    const turbine_recv_port: u16 = ConfigFile.gossip.turbine_recv_port;
 
     var gossip_service, var gossip_manager = try startGossip(allocator, &app_base, &.{
         .{ .tag = .repair, .port = repair_port },
@@ -823,7 +824,12 @@ fn shredCollector() !void {
     defer cleanup_service_handle.join();
 
     // shred collector
-    var shred_col_conf = config.current.shred_collector;
+
+    var shred_col_conf = sig.shred_collector.ShredCollectorConfig{
+        .turbine_recv_port = ConfigFile.gossip.turbine_recv_port,
+        .repair_port = ConfigFile.gossip.repair_port,
+        .start_slot = null,
+    };
     shred_col_conf.start_slot = shred_col_conf.start_slot orelse @panic("No start slot found");
     var prng = std.rand.DefaultPrng.init(91);
     var shred_collector_manager = try sig.shred_collector.start(
@@ -851,7 +857,7 @@ const GeyserWriter = sig.geyser.GeyserWriter;
 
 fn buildGeyserWriter(allocator: std.mem.Allocator, logger: Logger) !?*GeyserWriter {
     var geyser_writer: ?*GeyserWriter = null;
-    if (config.current.geyser.enable) {
+    if (ConfigFile.geyser.enable) {
         logger.info().log("Starting GeyserWriter...");
 
         const exit = try allocator.create(Atomic(bool));
@@ -860,9 +866,9 @@ fn buildGeyserWriter(allocator: std.mem.Allocator, logger: Logger) !?*GeyserWrit
         geyser_writer = try allocator.create(GeyserWriter);
         geyser_writer.?.* = try GeyserWriter.init(
             allocator,
-            config.current.geyser.pipe_path,
+            ConfigFile.geyser.pipe_path,
             exit,
-            config.current.geyser.writer_fba_bytes,
+            ConfigFile.geyser.writer_fba_bytes,
         );
 
         // start the geyser writer
@@ -1040,7 +1046,7 @@ pub fn testTransactionSenderService() !void {
         }
     }
 
-    for (config.current.gossip.entrypoints) |entrypoint| {
+    for (ConfigFile.gossip.entrypoints) |entrypoint| {
         if (std.mem.indexOf(u8, entrypoint, "testnet") == null) {
             @panic("Can only run transaction sender service on testnet!");
         }
@@ -1163,7 +1169,7 @@ fn initGossip(
     gossip_host_ip: IpAddr,
     sockets: []const struct { tag: SocketTag, port: u16 },
 ) !GossipService {
-    const gossip_port: u16 = config.current.gossip.port;
+    const gossip_port: u16 = ConfigFile.gossip.port;
     logger.info().logf("gossip host: {any}", .{gossip_host_ip});
     logger.info().logf("gossip port: {d}", .{gossip_port});
 
@@ -1191,7 +1197,7 @@ fn startGossip(
     /// Extra sockets to publish in gossip, other than the gossip socket
     extra_sockets: []const struct { tag: SocketTag, port: u16 },
 ) !struct { *GossipService, sig.utils.service_manager.ServiceManager } {
-    const gossip_port = config.current.gossip.port;
+    const gossip_port = ConfigFile.gossip.port;
     app_base.logger.info().logf("gossip host: {any}", .{app_base.my_ip});
     app_base.logger.info().logf("gossip port: {d}", .{gossip_port});
 
@@ -1224,18 +1230,17 @@ fn startGossip(
     try manager.defers.deferCall(GossipService.deinit, .{service});
 
     try service.start(.{
-        .spy_node = config.current.gossip.spy_node,
-        .dump = config.current.gossip.dump,
+        .spy_node = ConfigFile.gossip.spy_node,
+        .dump = ConfigFile.gossip.dump,
     }, &manager);
 
     return .{ service, manager };
 }
 
 fn runGossipWithConfigValues(gossip_service: *GossipService) !void {
-    const gossip_config = config.current.gossip;
     return gossip_service.run(.{
-        .spy_node = gossip_config.spy_node,
-        .dump = gossip_config.dump,
+        .spy_node = ConfigFile.gossip.spy_node,
+        .dump = ConfigFile.gossip.dump,
     });
 }
 
@@ -1262,7 +1267,7 @@ fn getMyDataFromIpEcho(
         logger.warn().log("could not get a shred version from an entrypoint");
         break :loop 0;
     };
-    const my_ip = try (config.current.gossip.getHost() orelse (my_ip_from_entrypoint orelse IpAddr.newIpv4(127, 0, 0, 1)));
+    const my_ip = try (ConfigFile.gossip.getHost() orelse (my_ip_from_entrypoint orelse IpAddr.newIpv4(127, 0, 0, 1)));
     logger.info().logf("my ip: {}", .{my_ip});
     return .{
         .shred_version = my_shred_version,
@@ -1314,10 +1319,7 @@ fn getEntrypoints(logger: Logger) !std.ArrayList(SocketAddr) {
     var entrypoint_set = EntrypointSet.init(gpa_allocator);
     defer entrypoint_set.deinit();
 
-    // try entrypoint_set.ensureTotalCapacity(config.current.gossip.entrypoints.len);
-    // try entrypoints.ensureTotalCapacityPrecise(config.current.gossip.entrypoints.len);
-
-    if (try config.current.gossip.getNetwork()) |cluster| {
+    if (try ConfigFile.gossip.getNetwork()) |cluster| {
         for (cluster.entrypoints()) |entrypoint| {
             logger.info().logf("adding predefined entrypoint: {s}", .{entrypoint});
             const socket_addr = try resolveSocketAddr(entrypoint, .noop);
@@ -1325,7 +1327,7 @@ fn getEntrypoints(logger: Logger) !std.ArrayList(SocketAddr) {
         }
     }
 
-    for (config.current.gossip.entrypoints) |entrypoint| {
+    for (ConfigFile.gossip.entrypoints) |entrypoint| {
         const socket_addr = SocketAddr.parse(entrypoint) catch brk: {
             break :brk try resolveSocketAddr(entrypoint, logger);
         };
@@ -1549,12 +1551,12 @@ fn downloadSnapshot() !void {
 
 fn getTrustedValidators(allocator: Allocator) !?std.ArrayList(Pubkey) {
     var trusted_validators: ?std.ArrayList(Pubkey) = null;
-    if (config.current.gossip.trusted_validators.len > 0) {
+    if (ConfigFile.consensus.trusted_validators.len > 0) {
         trusted_validators = try std.ArrayList(Pubkey).initCapacity(
             allocator,
-            config.current.gossip.trusted_validators.len,
+            ConfigFile.consensus.trusted_validators.len,
         );
-        for (config.current.gossip.trusted_validators) |trusted_validator_str| {
+        for (ConfigFile.consensus.trusted_validators) |trusted_validator_str| {
             trusted_validators.?.appendAssumeCapacity(
                 try Pubkey.fromString(trusted_validator_str),
             );

@@ -2,6 +2,7 @@ const ConfigFile = @This();
 
 const std = @import("std");
 const sig = @import("sig.zig");
+const IpAddr = sig.net.IpAddr;
 
 const Level = sig.trace.Level;
 
@@ -11,6 +12,37 @@ pub const SnapshotArchiveFormat = enum {
 };
 
 const PortRange = std.meta.Tuple(&.{ u16, u16 });
+
+pub const Network = enum {
+    mainnet,
+    devnet,
+    testnet,
+
+    pub fn entrypoints(self: Network) []const []const u8 {
+        return switch (self) {
+            .mainnet => &.{
+                "entrypoint.mainnet-beta.solana.com:8001",
+                "entrypoint2.mainnet-beta.solana.com:8001",
+                "entrypoint3.mainnet-beta.solana.com:8001",
+                "entrypoint4.mainnet-beta.solana.com:8001",
+                "entrypoint5.mainnet-beta.solana.com:8001",
+            },
+            .testnet => &.{
+                "entrypoint.testnet.solana.com:8001",
+                "entrypoint2.testnet.solana.com:8001",
+                "entrypoint3.testnet.solana.com:8001",
+            },
+            .devnet => &.{
+                "entrypoint.devnet.solana.com:8001",
+                "entrypoint2.devnet.solana.com:8001",
+                "entrypoint3.devnet.solana.com:8001",
+                "entrypoint4.devnet.solana.com:8001",
+                "entrypoint5.devnet.solana.com:8001",
+            },
+        };
+    }
+};
+
 const LogConfig = struct {
     // If no path is provided, the default is to place the log file in
     // /tmp with a name that will be unique.  If specified as "-", the
@@ -19,6 +51,16 @@ const LogConfig = struct {
     // The minimum log level which will be written to the log file.  Log
     // levels lower than this will be skipped
     level: Level = .info,
+};
+
+const MetricsConfig = struct {
+    port: u16 = 12345,
+};
+
+const GeyserConfig = struct {
+    enable: bool = false,
+    pipe_path: []const u8 = sig.VALIDATOR_DIR ++ "geyser.pipe",
+    writer_fba_bytes: usize = 1 << 32, // 4gb
 };
 
 const LedgerConfig = struct {
@@ -49,13 +91,36 @@ const GossipConfig = struct {
     entrypoints: [][]const u8 = &.{},
     // Gossip port number for the validator
     port: u16 = 8001,
+    // Turbine port number for the validator
+    turbine_recv_port: u16 = 8002,
+    // Repair port number for the validator
+    repair_port: u16 = 8003,
     // Gossip DNS name or IP address for the validator to advertise in gossip
     // default: ask --entrypoint, or 127.0.0.1 when --entrypoint is not provided
     host: ?[]const u8 = null,
+    // Network to connect to
+    network: ?[]const u8 = null,
     // Run as a gossip spy node (minimize outgoing packets)
     spy: bool = false,
     // Periodically dump gossip table to csv files and logs
     dump: bool = false,
+
+    pub fn getHost(config: GossipConfig) ?sig.net.SocketAddr.ParseIpError!IpAddr {
+        const host_str = config.host orelse return null;
+        const socket = try sig.net.SocketAddr.parse(host_str);
+        return switch (socket) {
+            .V4 => |v4| .{ .ipv4 = v4.ip },
+            .V6 => |v6| .{ .ipv6 = v6.ip },
+        };
+    }
+
+    pub fn getNetwork(self: GossipConfig) error{UnknownNetwork}!?Network {
+        return if (self.network) |network_str|
+            std.meta.stringToEnum(Network, network_str) orelse
+                error.UnknownNetwork
+        else
+            null;
+    }
 };
 
 const RPCConfig = struct {
@@ -132,14 +197,15 @@ const ConsensusConfig = struct {
     hard_fork_at_slots: ?u64 = null,
     // A snapshot hash must be published in gossip by this validator to be accepted.
     // If unspecified any snapshot hash will be accepted
-    known_validators: [][]const u8 = &.{},
+    trusted_validators: [][]const u8 = &.{},
 };
 
 // Range to use for dynamically assigned ports [default: 8000-10000]
 dynamic_port_range: PortRange = .{ 8_000, 10_000 },
 
 log: LogConfig = .{},
-// TODO: reporting
+metrics: MetricsConfig = .{},
+geyser: GeyserConfig = .{},
 ledger: LedgerConfig = .{},
 gossip: GossipConfig = .{},
 rpc: RPCConfig = .{},
