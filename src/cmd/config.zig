@@ -41,8 +41,8 @@ pub const Config = struct {
     }
 };
 
-pub const current: *Config = &default_validator_config;
-var default_validator_config: Config = .{};
+var config_path: ?[]const u8 = null;
+pub const current: *Config = &defaultValidatorConfig();
 
 pub const IdentityConfig = struct {};
 
@@ -163,3 +163,7 @@ pub const TurbineConfig = struct {
     // TODO: remove when no longer needed
     overwrite_stake_for_testing: bool = false,
 };
+
+fn defaultValidatorConfig() Config {
+    return Config{};
+}

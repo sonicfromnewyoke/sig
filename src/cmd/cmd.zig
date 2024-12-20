@@ -64,6 +64,18 @@ pub fn run() !void {
         // _ = gossip_value_gpa.deinit(); // Commented out for no leeks
     }
 
+    var config_file_option = cli.Option{
+        .long_name = "config",
+        .help =
+        \\Reads and loads Sig's configuration from the file.
+        \\
+        \\Overrides all other flags that have been passed 
+        ,
+        .value_ref = cli.mkRef(&config.config_path),
+        .required = false,
+        .value_name = "Config File",
+    };
+
     var gossip_host_option = cli.Option{
         .long_name = "gossip-host",
         .help =
@@ -399,11 +411,15 @@ pub fn run() !void {
                             ,
                         },
                         .options = &.{
+                            // config
+                            &config_file_option,
+                            // gossip
                             &gossip_host_option,
                             &gossip_port_option,
                             &gossip_entrypoints_option,
                             &gossip_spy_node_option,
                             &gossip_dump_option,
+                            // general
                             &network_option,
                         },
                         .target = .{
@@ -422,6 +438,8 @@ pub fn run() !void {
                             ,
                         },
                         .options = &.{
+                            // config
+                            &config_file_option,
                             // gossip
                             &gossip_host_option,
                             &gossip_port_option,
@@ -480,6 +498,8 @@ pub fn run() !void {
                         \\ for testnet or another `-u` for mainnet/devnet.
                         },
                         .options = &.{
+                            // config
+                            &config_file_option,
                             // gossip
                             &gossip_host_option,
                             &gossip_port_option,
